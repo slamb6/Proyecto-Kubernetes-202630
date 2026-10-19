@@ -67,6 +67,7 @@ TAMANOS = {
     "ordenar": {"baja": 100000, "media": 1000000, "alta": 3000000},
     "fib": {"baja": 25, "media": 30, "alta": 35},
     "matriz": {"baja": 60, "media": 120, "alta": 250},
+    "indice": {"baja": 250000, "media": 500000, "alta": 1000000}
 }
 
 
@@ -118,9 +119,8 @@ def seleccionar(catalogo):
 
     definicion = catalogo[lenguaje]
 
-    # TODO: mostrar las tareas de ese lenguaje con elegir_opcion(...).
-    # La lista de tareas esta en definicion["tasks"].
-    tarea = ...
+
+    tarea = elegir_opcion("Tarea:", definicion["tasks"])
 
     if tarea is None:
         return None
@@ -141,9 +141,9 @@ def seleccionar(catalogo):
         return None
     complejidad = etiqueta.split(" ")[0]
 
-    imagen = ...  # TODO: la imagen que declara `definicion` en el catalogo.
-    argumentos = ...  # TODO: [tarea, str(N del nivel elegido)].
-    recursos = ...  # TODO: la fila de NIVELES que corresponde a `complejidad`.
+    imagen = catalogo[lenguaje]["image"]  # la imagen que declara `definicion` en el catalogo.
+    argumentos = [tarea, str(TAMANOS[tarea][complejidad])]  # [tarea, str(N del nivel elegido)].
+    recursos = NIVELES[complejidad]  # la fila de NIVELES que corresponde a `complejidad`.
 
     return lenguaje, tarea, complejidad, imagen, argumentos, recursos
 
@@ -201,27 +201,27 @@ def crear_job(nombre, imagen, argumentos, recursos):
     # es el tope. Si el contenedor supera el limite de memoria, lo mata con
     # OOMKilled; si supera el de CPU, lo frena.
     limites = client.V1ResourceRequirements(
-        requests=...,  # TODO: {"cpu": ..., "memory": ...} desde `recursos`.
-        limits=...,    # TODO: idem con las claves de limite.
+        requests= { "cpu": recursos["cpu_request"], "memory": recursos["mem_request"] },
+        limits= { "cpu": recursos["cpu_limit"], "memory": recursos["mem_limit"] }
     )
 
     contenedor = client.V1Container(
         name="tarea",
         image=imagen,
-        image_pull_policy=...,  # TODO
-        args=...,               # TODO: los argumentos del contenedor.
+        image_pull_policy="Never",
+        args=argumentos,
         resources=limites,
     )
 
     plantilla = client.V1PodTemplateSpec(
         spec=client.V1PodSpec(
-            restart_policy=...,  # TODO
+            restart_policy="Never",
             containers=[contenedor],
         ),
     )
 
     especificacion = client.V1JobSpec(
-        backoff_limit=...,  # TODO
+        backoff_limit=0,
         template=plantilla,
     )
 
@@ -232,10 +232,10 @@ def crear_job(nombre, imagen, argumentos, recursos):
         spec=especificacion,
     )
 
-    # TODO: enviar el objeto al cluster con
+    # Enviar el objeto al cluster con
     #   cliente_batch().create_namespaced_job(namespace=NAMESPACE, body=job)
     # y devolver `nombre`.
-    raise NotImplementedError("crear_job")
+    return cliente_batch().create_namespaced_job(namespace=NAMESPACE, body=job).metadata.name
 
 
 # ---------------------------------------------------------------------------
@@ -252,12 +252,19 @@ def describir_estado(status):
     correctos = status.succeeded or 0
     fallidos = status.failed or 0
 
-    # TODO: devolver un texto que distinga los cuatro casos:
+    # Devolver un texto que distinga los cuatro casos:
     #   - `activos` > 0    -> el Job sigue en ejecucion;
     #   - `correctos` > 0  -> el Job termino correctamente;
     #   - `fallidos` > 0   -> el Job fallo;
     #   - los tres en cero -> el Pod todavia no ha arrancado.
-    raise NotImplementedError("describir_estado")
+    if activos > 0:
+        return "el Job sigue en ejecucion"
+    elif correctos > 0:
+        return "el Job termino correctamente"
+    elif fallidos > 0:
+        return "el Job fallo"
+    else:
+        return "el Pod todavia no ha arrancado"
 
 
 def listar_jobs():
@@ -265,11 +272,11 @@ def listar_jobs():
 
     Esta es la lista que muestra la opcion 2 del menu.
     """
-    # TODO: pedir todos los Jobs del namespace con
+    # Pedir todos los Jobs del namespace con
     #   cliente_batch().list_namespaced_job(namespace=NAMESPACE)
     # El resultado tiene un atributo `.items`; de cada elemento se usan
     # `job.metadata.name` y `job.status`.
-    jobs = ...
+    jobs = cliente_batch().list_namespaced_job(namespace=NAMESPACE)
 
     return [(job.metadata.name, describir_estado(job.status)) for job in jobs.items]
 
@@ -302,7 +309,7 @@ def consultar_logs(nombre):
 
     pod = pods.items[0].metadata.name
 
-    # TODO: devolver la salida del Pod. Pidan la respuesta sin procesar y
+    # Devolver la salida del Pod. Pidan la respuesta sin procesar y
     # decodifiquenla:
     #
     #   respuesta = core.read_namespaced_pod_log(
@@ -311,7 +318,9 @@ def consultar_logs(nombre):
     #
     # Sin `_preload_content=False`, el cliente 36.x devuelve el repr de los
     # bytes y los logs se imprimen como b'...\n...' en una sola linea.
-    raise NotImplementedError("consultar_logs")
+    respuesta = core.read_namespaced_pod_log(
+        name=pod, namespace=NAMESPACE)
+    return respuesta
 
 
 # ---------------------------------------------------------------------------
@@ -327,15 +336,23 @@ def jobs_terminados():
     """
     jobs = cliente_batch().list_namespaced_job(namespace=NAMESPACE)
 
-    # TODO: devolver la lista de nombres de los Jobs terminados. De cada `job`
+    # Devolver la lista de nombres de los Jobs terminados. De cada `job`
     # se usan `job.metadata.name` y los mismos contadores de `job.status` que
     # ya interpretaron en describir_estado: `active`, `succeeded` y `failed`.
-    raise NotImplementedError("jobs_terminados")
+    terminados = []
+    for job in jobs.items:
+        activos = job.status.active or 0
+        fallados = job.status.failed or 0
+        exitosos = job.status.succeeded or 0
+        if activos == 0 and (fallados > 0 or exitosos > 0):
+            terminados.append(job.metadata.name)
+
+    return terminados
 
 
 def eliminar_job(nombre):
     """Elimina un Job y, con el, el Pod que creo."""
-    # TODO: borrar el Job con
+    # Borrar el Job con
     #   cliente_batch().delete_namespaced_job(
     #       name=nombre,
     #       namespace=NAMESPACE,
@@ -346,7 +363,11 @@ def eliminar_job(nombre):
     # tambien los Pods del Job. Pruebenlo primero sin esa opcion y miren
     # `kubectl get pods -n estudiantes-202630`: el Job desaparece y su Pod se
     # queda huerfano en el namespace.
-    raise NotImplementedError("eliminar_job")
+    cliente_batch().delete_namespaced_job(
+        name=nombre,
+        namespace=NAMESPACE,
+        propagation_policy="Background"
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -30,6 +30,15 @@ def ordenar(n):
     assert all(datos[i] <= datos[i + 1] for i in range(0, len(datos) - 1, 997))
     return {"n": n, "primero": datos[0], "ultimo": datos[-1]}
 
+def indice(n):
+    print(f"Generando {n} enteros aleatorios...")
+    datos = [random.randint(0, 2**31) for _ in range(n)]
+    dato = random.choice(datos)
+    print(f"Buscando elemento {dato} escogido aleatoriamente")
+    indice = datos.index(dato)
+
+    return {"n": n, "elemento": dato, "indice": indice}
+
 
 def fib(n):
     # Recursivo a proposito: sin memoizacion satura una CPU.
@@ -62,6 +71,7 @@ TAREAS = {
     "ordenar": ordenar,
     "fib": fib,
     "matriz": matriz,
+    "indice": indice
 }
 
 
